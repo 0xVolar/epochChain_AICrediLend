@@ -52,30 +52,53 @@ contract LendingPool is Ownable{
         tokenB = IERC20(_tokenB);
     }
 
-    function stake(address user, uint amountB) external {
-        require(tokenB.balanceOf(msg.sender) >= amountB, "the amount is not enough");
-        _updateGlobalReward(user);
-        tokenB.transferFrom(msg.sender,address(this), amountB);
+    function stake(address user, uint amountB) public {
+        require(tokenB.balanceOf(user) >= amountB, "the amount is not enough");
+        if(stakedAmount == 0) {
+            tokenB.transferFrom(user,address(this), amountB);
+            stakedAmount += amountB;
 
-        if(isStake[user]) {
+            
+
+            if(isStake[user]) {
             Staker storage staker = stakers[user];
             staker.stakeAmount += amountB;
             stakedAmount += amountB;
-        } else {
-            Staker memory staker = Staker({
-                staker: msg.sender,
-                stakeAmount: amountB,
-                latestGlobalReward: globalReward,
-                rewards: 0
-            });
-            stakers[user] = staker;
-            isStake[user] = true;
-            stakedAmount += amountB;
+
+            } else {
+                Staker memory staker = Staker({
+                    staker: user,
+                    stakeAmount: amountB,
+                    latestGlobalReward: globalReward,
+                    rewards: 0
+                });
+                stakers[user] = staker;
+                isStake[user] = true;
+                stakedAmount += amountB;
+            }
+        } else{
+            _updateGlobalReward(user);
+            tokenB.transferFrom(user,address(this), amountB);
+
+            if(isStake[user]) {
+                Staker storage staker = stakers[user];
+                staker.stakeAmount += amountB;
+                stakedAmount += amountB;
+            } else {
+                Staker memory staker = Staker({
+                    staker: user,
+                    stakeAmount: amountB,
+                    latestGlobalReward: globalReward,
+                    rewards: 0
+                });
+                stakers[user] = staker;
+                isStake[user] = true;
+                stakedAmount += amountB;
+            }
         }
-        
     }
 
-    function withdraw(address user, uint amount) external {
+    function withdraw(address user, uint amount) public {
         claimReward(user);
         Staker storage staker = stakers[user];
         require(amount <= staker.stakeAmount, "the amount is wrong");
@@ -114,7 +137,7 @@ contract LendingPool is Ownable{
     
     function borrow(address user, uint256 amount, uint256 collateralAmount, uint256 duration) external returns(uint index) {
         require(collateralAmount >= (amount * 150) / 100, "Insufficient collateral");
-        require(tokenB.transferFrom(user, address(this), collateralAmount), "Collateral transfer failed");
+        stake(user, collateralAmount);
         require(tokenA.transfer(user, amount), "Loan transfer failed");
         
         loans[user].push(Loan({
@@ -133,8 +156,13 @@ contract LendingPool is Ownable{
         require(!loan.liquidated, "Loan already liquidated");
         
         uint256 repayment = loan.amount * (100 + INTEREST_RATE) / 100;
+        rewardPool += (repayment - loan.amount);
         require(tokenA.transferFrom(user, address(this), repayment), "Repayment failed");
-        require(tokenB.transfer(user, loan.collateral), "Collateral return failed");
+        if(isBorrow[user] == 0) {
+            withdraw(user, loan.collateral);
+        } else {
+            tokenB.transfer(user, loan.collateral);
+        }       
         
         loan.liquidated = true;
 
